@@ -1,41 +1,51 @@
 from flask import Flask,request, jsonify
 import requests
 
-app = Flask(__name__)
-app.users_by_id = {}
-class User:
-    def __init__(self, user_id: int, name: str):
-        self.id = user_id
-        self.name = name
-    def __repr__(self) -> str:
-        return f"User(id={self.id}, name={self.name})"
+from typing import Dict, Optional
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
 
-@app.route('/')
-def hello_world():
-    return 'Hello, World!'
+app = FastAPI()
 
-@app.route("/create_user", methods=["POST"])
-def create_user():
-    data = request.get_json(silent=True) or {}
-    user_id = data.get("id", data.get("user_id"))
-    name = data.get("name")
-    new_user = User(user_id=user_id, name=str(name))
+# ---- Models ----
+class User(BaseModel):
+    id: int
+    name: str
 
-    if user_id in app.users_by_id:
-        return jsonify({"error": f"User with id={user_id} already exists."}), 409
+class CreateUserRequest(BaseModel):
+    user_id: int
+    name: str
 
-    app.users_by_id[user_id] = new_user
-    print("created user"+str(new_user))
-    
-    return jsonify({"created": str(new_user), "total_users": len(app.users_by_id)}), 201
+class UpdateUserRequest(BaseModel):
+    name: Optional[str] = None
+    new_user_id: Optional[int] = None  # optional (usually not recommended)
+
+# ---- Global in-memory store (per process) ----
+users_by_id: Dict[int, User] = {}
 
 
-@app.route("/users", methods=["GET"])
+@app.post("/create_user", status_code=201)
+def create_user(payload: CreateUserRequest):
+    if payload.user_id in users_by_id:
+        raise HTTPException(status_code=409, detail=f"User with id={payload.user_id} already exists.")
+
+    user = User(id=payload.user_id, name=payload.name)
+    users_by_id[user.id] = user
+    return {"created": user, "total_users": len(users_by_id)}
+
+@app.get("/users")
 def list_users():
-    return jsonify([str(u) for u in app.users_by_id.values()]), 200
+    return list(users_by_id.values())
 
 
 
-if __name__ == '__main__':
-    app.run(debug=True)
+@app.get("/users/{user_id}")
+def get_user(user_id: int):
+    user = users_by_id.get(user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    return user
+
+
+
     
